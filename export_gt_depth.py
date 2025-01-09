@@ -47,7 +47,7 @@ def export_gt_depths_kitti():
         folder, frame_id, _ = line.split()
         frame_id = int(frame_id)
         print(i)
-        print(folder)
+        
 
         if opt.split == "eigen":
             calib_dir = os.path.join(opt.data_path, folder.split("/")[0])
