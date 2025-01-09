@@ -43,7 +43,7 @@ class SCAREDRAWDataset(SCAREDDataset):
         sequence = folder[8]
         data_splt = "train" if int(sequence) < 8 else "test"
         image_path = os.path.join(
-            self.data_path, data_splt, folder, "data", self.side_map[side], f_str)
+            self.data_path, folder, "data", f_str)
 
         return image_path
 

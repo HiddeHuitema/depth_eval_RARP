@@ -173,7 +173,6 @@ def evaluate(opt):
                 raise NotImplementedError('Not yet implemented for endonerf data')
 
             gt_height, gt_width = gt_depth.shape[:2]
-            print(pred_disp.shape)
             pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
             pred_depth = 1/pred_disp
 
