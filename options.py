@@ -86,11 +86,11 @@ class MonodepthOptions:
         self.parser.add_argument("--height",
                                  type=int,
                                  help="input image height",
-                                 default=256)
+                                 default=518)
         self.parser.add_argument("--width",
                                  type=int,
                                  help="input image width",
-                                 default=320)
+                                 default=518)
         self.parser.add_argument("--disparity_smoothness",
                                  type=float,
                                  help="disparity smoothness weight",
@@ -212,7 +212,7 @@ class MonodepthOptions:
         self.parser.add_argument("--model_type",
                                  type=str,
                                  help="which training split to use",
-                                 choices=["endodac", "afsfm","depthanything"],
+                                 choices=["endodac", "afsfm","depthanything_v2","depthanything_v1"],
                                  default="endodac")
         self.parser.add_argument("--eval_stereo",
                                  help="if set evaluates in stereo mode",

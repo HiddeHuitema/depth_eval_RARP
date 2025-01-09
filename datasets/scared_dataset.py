@@ -52,11 +52,6 @@ class SCAREDRAWDataset(SCAREDDataset):
         sequence = folder[7]
         # data_splt = "train" if int(sequence) < 8 else "test"
         data_splt = 'test'
-        # depth_path = os.path.join(
-        #     self.data_path, data_splt, folder, "data", self.side_map[side] + "_depth",
-        #     f_str)
-
-        # depth_gt = cv2.imread(depth_path, 2)
         
         depth_path = os.path.join(
             self.data_path, data_splt, folder, "data", "scene_points",

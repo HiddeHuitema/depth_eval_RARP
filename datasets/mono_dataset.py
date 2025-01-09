@@ -137,7 +137,6 @@ class MonoDataset(data.Dataset):
 
         line = self.filenames[index].split()
         folder = line[0]
-        print(folder)
 
         sequence = folder[8]
         keyframe = folder[-1]
