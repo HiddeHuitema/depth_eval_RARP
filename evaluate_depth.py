@@ -90,14 +90,14 @@ def evaluate(opt):
         if opt.model_type == 'endodac':
             depther = endodac.endodac(
                 backbone_size = "base", r=opt.lora_rank, lora_type=opt.lora_type,
-                image_shape=(224,280), pretrained_path=opt.pretrained_path,
+                image_shape=(opt.width,opt.height), pretrained_path=opt.pretrained_path,
                 residual_block_indexes=opt.residual_block_indexes,
                 include_cls_token=opt.include_cls_token)
             model_dict = depther.state_dict()
             depther.load_state_dict({k: v for k, v in depther_dict.items() if k in model_dict})
             depther.cuda()
             depther.eval()
-        elif opt.model_type == 'depthanything_v2' or opt.model_type == 'depthanything_v1':
+        elif opt.model_type == 'depthanything_v2' or opt.model_type == 'depthanything_v1': # Depthanything 1 and 2 use the same architecture, so load the same structure, only diff weights
             depther = DepthAnythingV2(**{'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]}) # only implemented for base model for now
             depther.load_state_dict(depther_dict)
             depther.cuda()

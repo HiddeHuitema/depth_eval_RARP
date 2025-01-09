@@ -1,3 +1,4 @@
 models/
 pretrained_model/
 splits/endovis/gt_depths.npz
+__pycache__/

@@ -86,11 +86,11 @@ class MonodepthOptions:
         self.parser.add_argument("--height",
                                  type=int,
                                  help="input image height",
-                                 default=518)
+                                 default=280)
         self.parser.add_argument("--width",
                                  type=int,
                                  help="input image width",
-                                 default=518)
+                                 default=224)
         self.parser.add_argument("--disparity_smoothness",
                                  type=float,
                                  help="disparity smoothness weight",
