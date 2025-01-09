@@ -33,7 +33,7 @@ def export_gt_depths_kitti():
 
     split_folder = os.path.join(os.path.dirname(__file__), "splits", opt.split)
     if opt.useage == "eval":
-        lines = readlines(os.path.join(split_folder, "test_files.txt"))
+        lines = readlines(os.path.join(split_folder, "test_files_kf1.txt"))
         output_path = os.path.join(split_folder, "gt_depths.npz")
     else:
         lines = readlines(os.path.join(split_folder, "3d_reconstruction.txt"))
@@ -60,18 +60,17 @@ def export_gt_depths_kitti():
             gt_depth = np.array(pil.open(gt_depth_path)).astype(np.float32) / 256
         elif opt.split == "endovis":
             f_str = "scene_points{:06d}.tiff".format(frame_id-1)
-            sequence = folder[7]
-            data_splt = "train" if int(sequence) < 8 else "test"
+            sequence = folder[8]
+            # data_splt = "train" if int(sequence) < 8 else "test"
             # gt_depth_path = os.path.join(
             # opt.data_path, data_splt, folder, "data", "left_depth",
             # f_str)
             # gt_depth = cv2.imread(gt_depth_path, 2)
             
-            gt_depth_path = os.path.join(
-            opt.data_path, data_splt, folder, "data", "scene_points",
-            f_str)
+            gt_depth_path = os.path.join(opt.data_path, folder, "data", "scene_points",f_str)
 
             gt_depth = cv2.imread(gt_depth_path, 3)
+            print(gt_depth_path)
             gt_depth = gt_depth[:, :, 0]
             gt_depth = gt_depth[0:1024, :]
 
