@@ -1,9 +1,9 @@
-name: depth_eval_2
+name: depth_eval_3
 channels:
   - pytorch
+  - conda-forge
   - nvidia
   - defaults
-  - conda-forge
   - https://repo.anaconda.com/pkgs/main
   - https://repo.anaconda.com/pkgs/r
 dependencies:
@@ -28,6 +28,8 @@ dependencies:
       - huggingface-hub==0.27.1
       - imageio==2.36.1
       - matplotlib==3.9.4
+      - mmengine==0.10.5
+      - mmsegmentation==1.2.2
       - numpy==1.26.4
       - opencv-python==4.10.0.84
       - scikit-image==0.24.0
@@ -35,6 +37,7 @@ dependencies:
       - scipy==1.13.1
       - tensorboardx==2.6.2.2
       - torchmetrics==0.10.3
-      - tqdm==4.67.1
+      - tqdm==4.65.2
       - xformers==0.0.18
-prefix: /media/thesis_ssd/anaconda/envs/endodac
+      - openmim
+
