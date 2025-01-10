@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import scipy.stats as st
 
 from utils.layers import disp_to_depth
-from utils.utils import readlines, compute_errors
+from utils.utils import readlines, compute_errors,load_dinoV2_depth
 from options import MonodepthOptions
 import datasets
 import models.encoders as encoders
@@ -23,6 +23,8 @@ import models.decoders as decoders
 import models.endodac as endodac
 
 from models.depth_anything_v2.dpt import DepthAnythingV2
+
+
 
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
 
@@ -75,6 +77,9 @@ def evaluate(opt):
             depther_path = os.path.join(opt.load_weights_folder, "depth_anything_vitb14.pth")
             depther_dict = torch.load(depther_path, map_location='cpu')
 
+        elif opt.model_type == 'dyno_v2':
+            model = load_dinoV2_depth()
+
             
 
         if opt.eval_split == 'endovis':
@@ -100,6 +105,10 @@ def evaluate(opt):
         elif opt.model_type == 'depthanything_v2' or opt.model_type == 'depthanything_v1': # Depthanything 1 and 2 use the same architecture, so load the same structure, only diff weights
             depther = DepthAnythingV2(**{'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]}) # only implemented for base model for now
             depther.load_state_dict(depther_dict)
+            depther.cuda()
+            depther.eval()
+        elif opt.model_type == 'dyno_v2':
+            depther = model
             depther.cuda()
             depther.eval()
     else:
@@ -141,23 +150,31 @@ def evaluate(opt):
 
             if opt.ext_disp_to_eval is None:
                 time_start = time.time()
-                output = depther(input_color)
+                if opt.model_type == 'dyno_v2':
+                    output = depther.whole_inference(input_color,img_meta = None,rescale = True)
+                    output_disp = output
+                else:
+                    output = depther(input_color)
                 inference_time = time.time() - time_start
                 if opt.model_type == 'endodac':
                     output_disp = output[("disp", 0)]
                 elif opt.model_type == 'depthanything_v2' or opt.model_type =='depthanything_v1':
                     output_disp = output
-                else:
-                    raise NotImplementedError('Script not implemented for this model yet')
+
+                # else:
+                #     raise NotImplementedError('Script not implemented for this model yet')
 
 
                 pred_disp, _ = disp_to_depth(output_disp, opt.min_depth, opt.max_depth)
-                if opt.model_type =='endodac':
+
+
+                if opt.model_type =='endodac' or opt.model_type =='dyno_v2':
                     pred_disp = pred_disp.cpu()[:, 0].numpy()
                 elif opt.model_type == 'depthanything_v2' or opt.model_type == 'depthanything_v1':
                     pred_disp = pred_disp.cpu().numpy()
+                
                 pred_disp = pred_disp[0]
-
+           
 
             else:
                 pred_disp = pred_disps[i]
@@ -172,10 +189,23 @@ def evaluate(opt):
             elif opt.eval_split == 'endonerf':
                 raise NotImplementedError('Not yet implemented for endonerf data')
 
+
+
             gt_height, gt_width = gt_depth.shape[:2]
             pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
-            pred_depth = 1/pred_disp
+            if opt.model_type == 'dyno_v2' :
+                pred_depth = pred_disp
+            else:
+                pred_depth = 1/pred_disp
 
+            # fig, ax = plt.subplots(1,3,figsize = (15,5))
+            # im1 = ax[0].imshow(pred_depth)
+            # ax[1].imshow(gt_depth)
+            # ax[2].imshow(input_color.detach().cpu().squeeze(0).permute(1,2,0))
+            # plt.colorbar(im1,ax = ax[0])
+            # plt.show()
+            # break
+            
             mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
             if opt.visualize_depth:
