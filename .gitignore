@@ -1,4 +1,7 @@
 models/
 pretrained_model/
 splits/endovis/gt_depths.npz
+splits/endovis/gt_depths_val.npz
+splits/endovis/gt_depths_test.npz
+
 __pycache__/
