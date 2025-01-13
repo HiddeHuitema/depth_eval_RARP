@@ -115,7 +115,7 @@ def evaluate(opt):
         print("-> Loading predictions from {}".format(opt.ext_disp_to_eval))
         pred_disps = np.load(opt.ext_disp_to_eval)
         if opt.eval_split == 'endovis':
-            filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files_kf.txt"))
+            filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
             dataset = datasets.SCAREDRAWDataset(opt.data_path, filenames,
                                             opt.height, opt.width,
                                             [0], 4, is_train=False)
@@ -182,10 +182,16 @@ def evaluate(opt):
             inference_times.append(inference_time)
             
             if opt.eval_split == 'endovis':
-                gt_depth = gt_depths[i]
+                # gt_depth = gt_depths[i]
+                
                 sequence = str(np.array(data['sequence'][0]))
                 keyframe = str(np.array(data['keyframe'][0]))
-                frame_id = "{:06d}".format(data['frame_id'][0])
+                frame_id = "{:06d}.npz".format(data['frame_id'][0]-1)
+                # print()
+                gt_path = os.path.join(opt.data_path,'dataset_{}'.format(sequence),'keyframe_{}'.format(keyframe),'data/scene_points','depth{}'.format(frame_id))
+                gt_depth = np.load(gt_path,fix_imports=True, encoding='latin1')["data"]
+                # print(gt_depth)
+                
             elif opt.eval_split == 'endonerf':
                 raise NotImplementedError('Not yet implemented for endonerf data')
 
@@ -197,7 +203,6 @@ def evaluate(opt):
                 pred_depth = pred_disp
             else:
                 pred_depth = 1/pred_disp
-
             # fig, ax = plt.subplots(1,3,figsize = (15,5))
             # im1 = ax[0].imshow(pred_depth)
             # ax[1].imshow(gt_depth)
