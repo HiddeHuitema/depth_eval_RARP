@@ -234,7 +234,7 @@ class MonodepthOptions:
                                  type=str,
                                  default="endovis",
                                  choices=[
-                                    "hamlyn", "c3vd", "endovis"],
+                                    "hamlyn", "c3vd", "endovis","endonerf"],
                                  help="which split to run eval on")
         self.parser.add_argument("--save_pred_disps",
                                  help="if set saves predicted disparities",

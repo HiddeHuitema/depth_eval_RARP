@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function
 import os
 import cv2
 import datasets.scared_dataset
+import datasets.endonerf_data
 import numpy as np
 from tqdm import tqdm
 import time
@@ -10,6 +11,7 @@ import time
 
 import torch
 from torch.utils.data import DataLoader
+import torchvision.transforms as tf
 from PIL import Image
 import matplotlib.pyplot as plt
 import scipy.stats as st
@@ -54,6 +56,7 @@ def evaluate(opt):
     """
     MIN_DEPTH = 1e-3
     MAX_DEPTH = 150
+    counter = 0
 
     assert sum((opt.eval_mono, opt.eval_stereo)) == 1, \
         "Please choose mono or stereo evaluation by setting either --eval_mono or --eval_stereo"
@@ -83,10 +86,16 @@ def evaluate(opt):
             
 
         if opt.eval_split == 'endovis':
-            filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files_kf1.txt"))
+            filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
             dataset = datasets.scared_dataset.SCAREDRAWDataset(opt.data_path, filenames,
                                             opt.height, opt.width,
                                             [0], 4, is_train=False)
+        elif opt.eval_split == 'endonerf':
+            rgb_dir = os.path.join(opt.data_path,'images')
+            depth_dir = os.path.join(opt.data_path,'depth')
+            transforms = tf.Compose([tf.Resize((opt.height,opt.width),antialias = True),tf.ConvertImageDtype(torch.float32)])
+            transforms_depth = tf.Compose([tf.ConvertImageDtype(torch.float32)])
+            dataset = datasets.endonerf_data.EndoNerfDataset(rgb_dir,depth_dir,transforms,transforms_depth)
 
 
         dataloader = DataLoader(dataset, 1, shuffle=False, num_workers=opt.num_workers,
@@ -143,7 +152,11 @@ def evaluate(opt):
 
     with torch.no_grad():
         for i, data in tqdm(enumerate(dataloader),total=len(dataloader)):
-            input_color = data[("color", 0, 0)].cuda()
+            if opt.eval_split == 'endovis':
+
+                input_color = data[("color", 0, 0)].cuda()
+            elif opt.eval_split == 'endonerf':
+                input_color = data['rgb'].cuda()
             if opt.post_process:
                 # Post-processed results require each image to have two forward passes
                 input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
@@ -168,13 +181,14 @@ def evaluate(opt):
                 pred_disp, _ = disp_to_depth(output_disp, opt.min_depth, opt.max_depth)
 
 
+
                 if opt.model_type =='endodac' or opt.model_type =='dyno_v2':
                     pred_disp = pred_disp.cpu()[:, 0].numpy()
                 elif opt.model_type == 'depthanything_v2' or opt.model_type == 'depthanything_v1':
                     pred_disp = pred_disp.cpu().numpy()
                 
-                pred_disp = pred_disp[0]
-        
+                pred_disp = pred_disp[0] # should be WxH
+                
 
             else:
                 pred_disp = pred_disps[i]
@@ -190,12 +204,15 @@ def evaluate(opt):
                 # print()
                 gt_path = os.path.join(opt.data_path,'dataset_{}'.format(sequence),'keyframe_{}'.format(keyframe),'data/scene_points','depth{}'.format(frame_id))
                 gt_depth = np.load(gt_path,fix_imports=True, encoding='latin1')["data"]
-                # print(gt_depth)
+                
                 
             elif opt.eval_split == 'endonerf':
-                raise NotImplementedError('Not yet implemented for endonerf data')
-
-
+                # print(data['id'][0])
+                frame_id ,_,_= data['id'][0].split('.')
+                frame_id = "{}.npz".format(frame_id)
+                gt_path = os.path.join(opt.data_path,'depth','depth_{}'.format(frame_id))
+                # print(gt_path)
+                gt_depth = np.load(gt_path,fix_imports=True, encoding='latin1')["data"]
 
             gt_height, gt_width = gt_depth.shape[:2]
             pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
@@ -214,22 +231,34 @@ def evaluate(opt):
             mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
             if opt.visualize_depth:
-                
+                if opt.eval_split =='endovis':
+                    rgb = data[("color", 0, 0)].squeeze().permute(1,2,0)
+                elif opt.eval_split =='endonerf':
+                    rgb = data['rgb'].squeeze().permute(1,2,0)
                 # vis_pred_depth = render_depth(pred_disp)
-                fig,ax = plt.subplots(1,2,figsize = (10,5))
-                ax[0].imshow(data[("color", 0, 0)].squeeze().permute(1,2,0))
+                fig,ax = plt.subplots(1,3,figsize = (15,5))
+                ax[0].imshow(rgb)
                 im1 = ax[1].imshow(pred_depth)
-
                 plt.colorbar(im1,ax = ax[1])
 
-                vis_file_name = os.path.join(vis_dir, sequence + "_" +  keyframe + "_" + frame_id + ".png")
+                im2 = ax[2].imshow(gt_depth)
+                plt.colorbar(im2,ax= ax[2])
+
+                if opt.eval_split =='endovis':
+                    vis_file_name = os.path.join(vis_dir, sequence + "_" +  keyframe + "_" + frame_id + ".png")
+                elif opt.eval_split =='endonerf':
+                    vis_file_name = os.path.join(vis_dir,frame_id + ".png")
                 # cv2.imwrite(vis_file_name, ax)
                 fig.savefig(vis_file_name)
                 plt.close()
 
             pred_depth = pred_depth[mask]
             gt_depth = gt_depth[mask]
-            
+            if gt_depth.shape[0]<1000: # If there are fewer than 1000 valid pixels, skip the current iteration
+                counter+=1
+                continue
+            # print(pred_depth.shape)
+            # print(gt_depth.shape)
             pred_depth *= opt.pred_depth_scale_factor
             if not opt.disable_median_scaling:
                 ratio = np.median(gt_depth) / np.median(pred_depth)
@@ -239,6 +268,8 @@ def evaluate(opt):
             pred_depth[pred_depth < MIN_DEPTH] = MIN_DEPTH
             pred_depth[pred_depth > MAX_DEPTH] = MAX_DEPTH
             error = compute_errors(gt_depth, pred_depth)
+            # print(error)
+
             if not np.isnan(error).all():
                 errors.append(error)
 
@@ -260,6 +291,7 @@ def evaluate(opt):
     print("cls: " + ("& [{: 6.3f}, {: 6.3f}] " * 7).format(*cls.tolist()) + "\\\\")
     print("average inference time: {:0.1f} ms".format(np.mean(np.array(inference_times))*1000))
     print("\n-> Done!")
+    print('counter: {}'.format(counter))
 
 if __name__ == "__main__":
     options = MonodepthOptions()
