@@ -128,7 +128,7 @@ def evaluate(opt):
         gt_depths = np.load(gt_path, fix_imports=True, encoding='latin1')["data"]
         
     if opt.visualize_depth:
-        vis_dir = os.path.join(opt.load_weights_folder, "vis_depth")
+        vis_dir = os.path.join(opt.vis_folder,opt.model_type, "vis_depth")
         os.makedirs(vis_dir, exist_ok=True)
 
     inference_times = []
@@ -142,7 +142,7 @@ def evaluate(opt):
         opt.width, opt.height))
 
     with torch.no_grad():
-        for i, data in tqdm(enumerate(dataloader)):
+        for i, data in tqdm(enumerate(dataloader),total=len(dataloader)):
             input_color = data[("color", 0, 0)].cuda()
             if opt.post_process:
                 # Post-processed results require each image to have two forward passes
@@ -174,7 +174,7 @@ def evaluate(opt):
                     pred_disp = pred_disp.cpu().numpy()
                 
                 pred_disp = pred_disp[0]
-           
+        
 
             else:
                 pred_disp = pred_disps[i]
@@ -215,10 +215,18 @@ def evaluate(opt):
 
             if opt.visualize_depth:
                 
-                vis_pred_depth = render_depth(pred_disp)
+                # vis_pred_depth = render_depth(pred_disp)
+                fig,ax = plt.subplots(1,2,figsize = (10,5))
+                ax[0].imshow(data[("color", 0, 0)].squeeze().permute(1,2,0))
+                im1 = ax[1].imshow(pred_depth)
+
+                plt.colorbar(im1,ax = ax[1])
+
                 vis_file_name = os.path.join(vis_dir, sequence + "_" +  keyframe + "_" + frame_id + ".png")
-                cv2.imwrite(vis_file_name, vis_pred_depth)
-            
+                # cv2.imwrite(vis_file_name, ax)
+                fig.savefig(vis_file_name)
+                plt.close()
+
             pred_depth = pred_depth[mask]
             gt_depth = gt_depth[mask]
             

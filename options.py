@@ -242,6 +242,9 @@ class MonodepthOptions:
         self.parser.add_argument("--visualize_depth",
                                  help="if set saves visualized depth map",
                                  action="store_true")
+        self.parser.add_argument("--vis_folder",
+                                 help = 'folder to save visualisations in',
+                                 default='depth_viz')
         self.parser.add_argument("--no_eval",
                                  help="if set disables evaluation",
                                  action="store_true")
