@@ -208,7 +208,7 @@ def load_dinoV2_depth(backbone_size = 'base',head_dataset = 'nyu', head_type = '
 
 
     head_dataset = "nyu" # in ("nyu", "kitti")
-    head_type = "dpt" # in ("linear", "linear4", "dpt")
+    head_type = "linear4" # in ("linear", "linear4", "dpt")
 
 
     DINOV2_BASE_URL = "https://dl.fbaipublicfiles.com/dinov2"

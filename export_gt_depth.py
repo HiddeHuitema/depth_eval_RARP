@@ -74,11 +74,7 @@ def export_gt_depths_kitti():
             f_str = "scene_points{:06d}.tiff".format(frame_id-1)
             f_str_save = 'depth{:06d}.npz'.format(frame_id-1)
             sequence = folder[8]
-            # data_splt = "train" if int(sequence) < 8 else "test"
-            # gt_depth_path = os.path.join(
-            # opt.data_path, data_splt, folder, "data", "left_depth",
-            # f_str)
-            # gt_depth = cv2.imread(gt_depth_path, 2)
+
             
             gt_depth_path = os.path.join(opt.data_path, folder, "data", "scene_points",f_str)
 
@@ -87,23 +83,8 @@ def export_gt_depths_kitti():
             gt_depth = gt_depth[:, :, 0]
             gt_depth = gt_depth[0:1024, :]
             np.savez_compressed(os.path.join(opt.data_path, folder, "data", "scene_points",f_str_save), data=gt_depth)
-        # if i ==1:
-        #     gt_depths = np.zeros([len(lines),gt_depth.shape[0],gt_depth.shape[1]])
-        # if i == 900:
-        #     print(gt_depths.nbytes)
-        # gt_depths[i-1,:,:] = gt_depth.astype(np.float32)
 
-        # gt_depths.append(gt_depth.astype(np.float32))
-    # print(gt_depths.nbytes)
-    # print(gt_depths.shape)
-    # data_out = np.array(gt_depths)
-    # print(gt_depths.shape)
-    # print('array memory size: {}'.format(np.array(gt_depths).nbytes))
     print("Saving to {}".format(opt.split))
-
-    
-    # with open('val_depths.txt','wb') as f:
-    #     pickle.dump(gt_depths,f)
 
 
 

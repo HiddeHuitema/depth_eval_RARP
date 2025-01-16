@@ -77,7 +77,7 @@ def evaluate(opt):
             depther_dict = torch.load(depther_path, map_location='cpu')
 
         elif opt.model_type == 'depthanything_v1':
-            depther_path = os.path.join(opt.load_weights_folder, "depth_anything_vitb14.pth")
+            depther_path = os.path.join(opt.load_weights_folder, "depth_anything_vitl14.pth")
             depther_dict = torch.load(depther_path, map_location='cpu')
 
         elif opt.model_type == 'dyno_v2':
@@ -112,7 +112,8 @@ def evaluate(opt):
             depther.cuda()
             depther.eval()
         elif opt.model_type == 'depthanything_v2' or opt.model_type == 'depthanything_v1': # Depthanything 1 and 2 use the same architecture, so load the same structure, only diff weights
-            depther = DepthAnythingV2(**{'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]}) # only implemented for base model for now
+            # depther = DepthAnythingV2(**{'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]}) # only implemented for base model for now
+            depther = DepthAnythingV2(**{'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]})
             depther.load_state_dict(depther_dict)
             depther.cuda()
             depther.eval()
@@ -195,9 +196,7 @@ def evaluate(opt):
                 inference_time = 1
             inference_times.append(inference_time)
             
-            if opt.eval_split == 'endovis':
-                # gt_depth = gt_depths[i]
-                
+            if opt.eval_split == 'endovis': # For endovis, load gt from previously computed .npz depth maps            
                 sequence = str(np.array(data['sequence'][0]))
                 keyframe = str(np.array(data['keyframe'][0]))
                 frame_id = "{:06d}.npz".format(data['frame_id'][0]-1)
@@ -206,27 +205,19 @@ def evaluate(opt):
                 gt_depth = np.load(gt_path,fix_imports=True, encoding='latin1')["data"]
                 
                 
-            elif opt.eval_split == 'endonerf':
-                # print(data['id'][0])
+            elif opt.eval_split == 'endonerf': # Load GT from previously computed .npz depth maps
                 frame_id ,_,_= data['id'][0].split('.')
                 frame_id = "{}.npz".format(frame_id)
                 gt_path = os.path.join(opt.data_path,'depth','depth_{}'.format(frame_id))
-                # print(gt_path)
                 gt_depth = np.load(gt_path,fix_imports=True, encoding='latin1')["data"]
 
             gt_height, gt_width = gt_depth.shape[:2]
             pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
-            if opt.model_type == 'dyno_v2' :
+            if opt.model_type == 'dyno_v2' : # Dyno directly predicts depth, so no need to convert disp to depth
                 pred_depth = pred_disp
             else:
                 pred_depth = 1/pred_disp
-            # fig, ax = plt.subplots(1,3,figsize = (15,5))
-            # im1 = ax[0].imshow(pred_depth)
-            # ax[1].imshow(gt_depth)
-            # ax[2].imshow(input_color.detach().cpu().squeeze(0).permute(1,2,0))
-            # plt.colorbar(im1,ax = ax[0])
-            # plt.show()
-            # break
+
             
             mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
@@ -248,17 +239,15 @@ def evaluate(opt):
                     vis_file_name = os.path.join(vis_dir, sequence + "_" +  keyframe + "_" + frame_id + ".png")
                 elif opt.eval_split =='endonerf':
                     vis_file_name = os.path.join(vis_dir,frame_id + ".png")
-                # cv2.imwrite(vis_file_name, ax)
                 fig.savefig(vis_file_name)
                 plt.close()
 
             pred_depth = pred_depth[mask]
             gt_depth = gt_depth[mask]
-            if gt_depth.shape[0]<1000: # If there are fewer than 1000 valid pixels, skip the current iteration
+            if gt_depth.shape[0]<1000: # If there are fewer than 1000 valid depth pixels, skip the current iteration
                 counter+=1
                 continue
-            # print(pred_depth.shape)
-            # print(gt_depth.shape)
+
             pred_depth *= opt.pred_depth_scale_factor
             if not opt.disable_median_scaling:
                 ratio = np.median(gt_depth) / np.median(pred_depth)
