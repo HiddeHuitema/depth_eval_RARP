@@ -212,7 +212,7 @@ class MonodepthOptions:
         self.parser.add_argument("--model_type",
                                  type=str,
                                  help="which training split to use",
-                                 choices=["endodac", "afsfm","depthanything_v2","depthanything_v1","dyno_v2"],
+                                 choices=["endodac", "afsfm","depthanything_v2","depthanything_v1","dino_v2","surgedepth","depthpro"],
                                  default="endodac")
         self.parser.add_argument("--eval_stereo",
                                  help="if set evaluates in stereo mode",

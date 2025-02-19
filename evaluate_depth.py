@@ -4,6 +4,7 @@ import os
 import cv2
 import datasets.scared_dataset
 import datasets.endonerf_data
+import datasets.hamlyn_dataset
 import numpy as np
 from tqdm import tqdm
 import time
@@ -26,6 +27,7 @@ import models.endodac as endodac
 
 from models.depth_anything_v2.dpt import DepthAnythingV2
 from models.depth_anything_v1.dpt import DepthAnything
+from models.SurgeDepth.dpt import SurgeDepth
 
 from torchvision.transforms import Compose
 from models.depth_anything_v1.util.transform import Resize, NormalizeImage, PrepareForNet
@@ -40,8 +42,9 @@ cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV
 def align_shift_and_scale(gt_disp, pred_disp):
 
     t_gt = np.median(gt_disp)
+    # print(gt_disp)
     s_gt = np.mean(np.abs(gt_disp - t_gt))
-
+    
     t_pred = np.median(pred_disp)
     s_pred = np.mean(np.abs(pred_disp - t_pred))
     # print(t_gt, s_gt, t_pred, s_pred)
@@ -118,8 +121,16 @@ def evaluate(opt):
             depther_path = os.path.join(opt.load_weights_folder, "depth_anything_vitb14.pth")
             depther_dict = torch.load(depther_path, map_location='cpu')
 
-        elif opt.model_type == 'dyno_v2':
+        elif opt.model_type == 'surgedepth':
+            depther_path = os.path.join(opt.load_weights_folder, "SurgeDepthStudent_V5.pth")
+            depther_dict = torch.load(depther_path, map_location='cpu')
+
+        elif opt.model_type == 'dino_v2':
             model = load_dinoV2_depth()
+
+        elif opt.model_type == 'depthpro':
+            from models.depth_pro.depth_pro import create_model_and_transforms
+            model,transforms_depthpro = create_model_and_transforms(precision=torch.float16) # Takes up too much vram at float32          
 
             
 
@@ -134,6 +145,13 @@ def evaluate(opt):
             transforms = tf.Compose([tf.Resize((opt.height,opt.width),antialias = True),tf.ConvertImageDtype(torch.float32)])
             transforms_depth = tf.Compose([tf.ConvertImageDtype(torch.float32)])
             dataset = datasets.endonerf_data.EndoNerfDataset(rgb_dir,depth_dir,transforms,transforms_depth)
+        elif opt.eval_split == 'hamlyn':
+            rgb_dir = os.path.join(opt.data_path,'image01')
+            depth_dir = os.path.join(opt.data_path,'depth01')
+            transforms = tf.Compose([tf.Resize((opt.height,opt.width),antialias = True),tf.ConvertImageDtype(torch.float32)])
+            transforms_depth = tf.Compose([tf.ToTensor()])
+            dataset = datasets.hamlyn_dataset.HamlynDataset(rgb_dir,depth_dir,transforms,transforms_depth)
+
 
 
         dataloader = DataLoader(dataset, 1, shuffle=False, num_workers=opt.num_workers,
@@ -161,10 +179,21 @@ def evaluate(opt):
             depther.load_state_dict(depther_dict)
             depther.cuda()
             depther.eval()
-        elif opt.model_type == 'dyno_v2':
+        elif opt.model_type == 'dino_v2':
             depther = model
             depther.cuda()
             depther.eval()
+        elif opt.model_type == 'surgedepth':
+            depther = SurgeDepth(**{'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]})
+            depther.load_state_dict(depther_dict)
+            depther.cuda()
+            depther.eval()
+
+        elif opt.model_type =='depthpro':
+            depther = model
+            depther.cuda()
+            depther.eval()
+
     else:
         print("-> Loading predictions from {}".format(opt.ext_disp_to_eval))
         pred_disps = np.load(opt.ext_disp_to_eval)
@@ -210,9 +239,15 @@ def evaluate(opt):
 
                 input_color = data[("color", 0, 0)].cuda()
                 # input_color = transform({'image': input_color})['image']
-                input_color = torchvision.transforms.functional.normalize(input_color,mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                if opt.model_type == 'surgedepth':
+                    input_color = torchvision.transforms.functional.normalize(input_color,mean=[0.46888983, 0.29536288, 0.28712815], std=[0.24689102 ,0.21034359, 0.21188641])
+                elif opt.model_type == 'depthpro':
+                    input_color = torchvision.transforms.functional.normalize(input_color,mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+                    input_color = input_color.to(torch.float16) # Depthpro requires half precision to run on laptop
+                else:
+                    input_color = torchvision.transforms.functional.normalize(input_color,mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
-            elif opt.eval_split == 'endonerf':
+            elif opt.eval_split == 'endonerf' or opt.eval_split =='hamlyn':
                 input_color = data['rgb'].cuda()
             if opt.post_process:
                 # Post-processed results require each image to have two forward passes
@@ -220,48 +255,42 @@ def evaluate(opt):
 
             if opt.ext_disp_to_eval is None:
                 time_start = time.time()
-                if opt.model_type == 'dyno_v2':
+                if opt.model_type == 'dino_v2':
                     output = depther.whole_inference(input_color,img_meta = None,rescale = True)
                     output_disp = output
+                elif opt.model_type =='depthpro':
+                    output = depther.infer(input_color)
+                    output_disp = output['depth']
                 else:
                     output = depther(input_color)
+
+                # print(output.max())
                 inference_time = time.time() - time_start
                 if opt.model_type == 'endodac':
                     output_disp = output[("disp", 0)]
-                elif opt.model_type == 'depthanything_v2' or opt.model_type =='depthanything_v1':
+                elif opt.model_type == 'depthanything_v2' or opt.model_type =='depthanything_v1' or opt.model_type =='surgedepth':
                     output_disp = output
+                
 
-                # else:
-                #     raise NotImplementedError('Script not implemented for this model yet')
-
-                # if opt.model_type == 'depthanything_v1' or opt.model_type =='depthanything_v2': # DA
-                #     output_disp = rescale_linear(output_disp,0.2,0.99)
-                # else:
-                #     pred_disp, _ = disp_to_depth(output_disp, opt.min_depth, opt.max_depth)
-                if opt.model_type == 'depthanything_v1' or opt.model_type =='depthanything_v2':
-                    pred_disp = output_disp
+                if opt.model_type == 'depthanything_v1' or opt.model_type =='depthanything_v2' or opt.model_type =='surgedepth':
+                    pred_disp = (output_disp-output_disp.min())/(output_disp.max()-output_disp.min())*9+1 # Scale all outputs between 1 and 10 for numerical stability
                 else:
                     pred_disp,_ = disp_to_depth(output_disp, opt.min_depth, opt.max_depth)
- 
 
-                # # else:
-                # plt.imshow(pred_disp.cpu().numpy().squeeze())
-                # plt.colorbar()
-                # plt.show()
-                #     pred_disp = output_disp
-                maxs.append(output_disp.max().item())
-                mins.append(output_disp.min().item())
-                maxs_pred.append(pred_disp.max().item())
-                mins_pred.append(pred_disp.min().item())                
+                
 
 
-                if opt.model_type =='endodac' or opt.model_type =='dyno_v2':
+                if opt.model_type =='endodac' or opt.model_type =='dino_v2':
                     pred_disp = pred_disp.cpu()[:, 0].numpy()
-                elif opt.model_type == 'depthanything_v2' or opt.model_type == 'depthanything_v1':
+                elif opt.model_type == 'depthanything_v2' or opt.model_type == 'depthanything_v1' or opt.model_type =='surgedepth' or opt.model_type =='depthpro':
                     pred_disp = pred_disp.cpu().numpy()
                 
-                pred_disp = pred_disp[0] # should be WxH
-                
+                if not opt.model_type =='depthpro':
+                    pred_disp = pred_disp[0] # should be WxH
+
+                # plt.imshow(pred_disp)
+                # plt.show()
+
 
             else:
                 pred_disp = pred_disps[i]
@@ -282,10 +311,14 @@ def evaluate(opt):
                 frame_id = "{}.npz".format(frame_id)
                 gt_path = os.path.join(opt.data_path,'depth','depth_{}'.format(frame_id))
                 gt_depth = np.load(gt_path,fix_imports=True, encoding='latin1')["data"]
+            elif opt.eval_split =='hamlyn':
+                gt_depth = data['depth'].squeeze().squeeze().numpy()
+                
+
 
             gt_height, gt_width = gt_depth.shape[:2]
             pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
-            if opt.model_type == 'dyno_v2': # Dyno directly predicts depth, so no need to convert disp to depth
+            if opt.model_type == 'dino_v2' or opt.model_type =='depthpro': # dino directly predicts depth, so no need to convert disp to depth
                 pred_depth = pred_disp
             else:
                 pred_depth = 1/pred_disp
@@ -300,42 +333,58 @@ def evaluate(opt):
             if opt.visualize_depth:
                 if opt.eval_split =='endovis':
                     rgb = data[("color", 0, 0)].squeeze().permute(1,2,0)
-                elif opt.eval_split =='endonerf':
+                elif opt.eval_split =='endonerf' or opt.eval_split =='hamlyn':
                     rgb = data['rgb'].squeeze().permute(1,2,0)
+
+                if opt.eval_split =='hamlyn':
+                    frame_id ,_= data['id'][0].split('.')
                 # vis_pred_depth = render_depth(pred_disp)
                 fig,ax = plt.subplots(1,3,figsize = (15,5))
                 ax[0].imshow(rgb)
                 im1 = ax[1].imshow(pred_depth)
                 plt.colorbar(im1,ax = ax[1])
 
-                im2 = ax[2].imshow(gt_depth)
+                im2 = ax[2].imshow((gt_depth-gt_depth.min())/(gt_depth.max()-gt_depth.min()))
                 plt.colorbar(im2,ax= ax[2])
 
                 if opt.eval_split =='endovis':
                     vis_file_name = os.path.join(vis_dir, sequence + "_" +  keyframe + "_" + frame_id + ".png")
-                elif opt.eval_split =='endonerf':
+                elif opt.eval_split =='endonerf' or opt.eval_split =='hamlyn':
                     vis_file_name = os.path.join(vis_dir,frame_id + ".png")
                 fig.savefig(vis_file_name)
                 plt.close()
-        
+    
+            # maxs_pred.append(pred_disp.max().item())
+            # mins_pred.append(pred_disp.min().item()) 
 
-
-
+            # print(gt_depth.shape)
             gt_depth = gt_depth[mask]
-            if opt.model_type == 'depthanything_v1':
+            # print(gt_depth.shape)
+            # pred_disp = pred_disp[mask]
+
+            if opt.model_type == 'depthanything_v1' or opt.model_type == 'depthanything_v2' or opt.model_type == 'surgedepth':
                 gt_disp = 1/gt_depth
+                if opt.model_type =='surgedepth':
+                    pred_disp = 1/pred_depth
                 pred_disp_aligned, t_gt, s_gt, t_pred, s_pred = align_shift_and_scale(gt_disp, pred_disp)
-        
+                # min_disp = 1/MAX_DEPTH
+                # max_disp = 1/MIN_DEPTH
+                # # print(f't_gt {t_gt}, s_gt {s_gt},t_pred {t_pred},s_pred{s_pred}')
+                # pred_disp_aligned[pred_disp_aligned<min_disp] = min_disp
+                # pred_disp_aligned[pred_disp_aligned>max_disp] = max_disp
+                # maxs_depth.append(pred_disp_aligned.max())
+                # mins_depth.append(pred_disp_aligned.min())
+
                 pred_depth = 1 / pred_disp_aligned
             pred_depth = pred_depth[mask]
 
-            # if gt_depth.shape[0]<1000: # If there are fewer than 1000 valid depth pixels, skip the current iteration
-            #     counter+=1
-            #     continue
+            if gt_depth.shape[0]<100: # If there are fewer than 1000 valid depth pixels, skip the current iteration
+                counter+=1
+                continue
 
             pred_depth *= opt.pred_depth_scale_factor
-            maxs_depth.append(pred_depth.max())
-            mins_depth.append(pred_depth.min())
+            # maxs_depth.append(pred_depth.max())
+            # mins_depth.append(pred_depth.min())
             # np.append(pred_depths,pred_depth)
             # print(np.median(gt_depth))
             # print(np.median(pred_depth))
@@ -350,10 +399,10 @@ def evaluate(opt):
             
             # maxs_depth.append(pred_depth.max())
             # mins_depth.append(pred_depth.min())
-            if pred_depth.max() >= MAX_DEPTH:
-                counter+=1
-                # nr_exceeds_max['nr'].append(sum(pred_depth>MAX_DEPTH))
-                # index = 1
+            # if pred_depth.max() >= MAX_DEPTH:
+            #     counter+=1
+            #     # nr_exceeds_max['nr'].append(sum(pred_depth>MAX_DEPTH))
+            #     # index = 1
             pred_depth[pred_depth < MIN_DEPTH] = MIN_DEPTH
             pred_depth[pred_depth > MAX_DEPTH] = MAX_DEPTH
             error = compute_errors(gt_depth, pred_depth)
@@ -373,12 +422,12 @@ def evaluate(opt):
         print(" Scaling ratios | med: {:0.3f} | std: {:0.3f}".format(med, np.std(ratios / med)))
 
     errors = np.array(errors)
-    maxs = np.array(maxs)
-    mins = np.array(mins)
-    maxs_pred = np.array(maxs_pred)
-    mins_pred = np.array(mins_pred)
-    mins_depth=np.array(mins_depth)
-    maxs_depth = np.array(maxs_depth)
+    # maxs = np.array(maxs)
+    # mins = np.array(mins)
+    # maxs_pred = np.array(maxs_pred)
+    # mins_pred = np.array(mins_pred)
+    # mins_depth=np.array(mins_depth)
+    # maxs_depth = np.array(maxs_depth)
     mean_errors = np.mean(errors, axis=0)
     # pred_depths = [depth for depth_list in pred_depths for depth in depth_list]
     # print(len(pred_depths))
@@ -392,12 +441,12 @@ def evaluate(opt):
     print("mean:" + ("&{: 12.3f}      " * 7).format(*mean_errors.tolist()) + "\\\\")
     print("cls: " + ("& [{: 6.3f}, {: 6.3f}] " * 7).format(*cls.tolist()) + "\\\\")
     print("average inference time: {:0.1f} ms".format(np.mean(np.array(inference_times))*1000))
-    print('Average max prediction {}, avg min prediction {}'.format(maxs.max(),mins.min()))
-    print('Average max prediction after norm {}, avg min prediction {}'.format(maxs_pred.max(),mins_pred.min()))
-    print('Average max depth prediction after norm {}, avg min prediction {}'.format(maxs_depth.max(),mins_depth.min()))
-    print('Nr exceeds {}'.format(nr_exceeds_max))
+    # print('Average max prediction {}, avg min prediction {}'.format(maxs.max(),mins.min()))
+    # print('Average max prediction after norm {}, avg min prediction {}'.format(maxs_pred.max(),mins_pred.min()))
+    # print('Average max depth prediction after norm {}, avg min prediction {}'.format(maxs_depth.max(),mins_depth.min()))
+    # print('Nr exceeds {}'.format(nr_exceeds_max))
     print("\n-> Done!")
-    print('counter: {},total recorded errors {}'.format(counter,len(errors)))
+    # print('counter: {},total recorded errors {}'.format(counter,len(errors)))
 
 if __name__ == "__main__":
     options = MonodepthOptions()
