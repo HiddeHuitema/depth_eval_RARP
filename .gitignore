@@ -5,3 +5,4 @@ splits/endovis/gt_depths_val.npz
 splits/endovis/gt_depths_test.npz
 depth_viz/
 __pycache__/
+SIFT/

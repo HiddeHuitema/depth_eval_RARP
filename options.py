@@ -259,6 +259,7 @@ class MonodepthOptions:
                                  help="if set will perform the flipping post processing "
                                       "from the original monodepth paper",
                                  action="store_true")
+        self.parser.add_argument('--endovis_split',default = 'test', type = str,help= 'which split to use for the endovis dataset')
 
         # EVALUATION options
         self.parser.add_argument("--save_recon",
