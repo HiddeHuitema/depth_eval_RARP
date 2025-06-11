@@ -143,7 +143,9 @@ def compute_errors(gt, pred):
 
     sq_rel = np.mean(((gt - pred) ** 2) / gt)
 
-    return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3
+    psnr = 20*np.log10(np.max(gt)/np.sqrt(rmse))
+
+    return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3, psnr
 
 
 class CenterPadding(torch.nn.Module):

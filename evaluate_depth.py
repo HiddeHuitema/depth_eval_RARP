@@ -33,8 +33,9 @@ from torchvision.transforms import Compose
 from models.depth_anything_v1.util.transform import Resize, NormalizeImage, PrepareForNet
 
 import torchvision
+import torchmetrics
 
-
+from pytorch_msssim import ms_ssim
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
 
 
@@ -120,7 +121,7 @@ def evaluate(opt):
             depther_dict = torch.load(depther_path, map_location='cpu')
 
         elif opt.model_type == 'surgedepth':
-            depther_path = os.path.join(opt.load_weights_folder, "SurgeDepthStudent_V5.pth")
+            depther_path = os.path.join(opt.load_weights_folder, "SurgeDepthStudent_V6.pth")
             depther_dict = torch.load(depther_path, map_location='cpu')
 
         elif opt.model_type == 'dino_v2':
@@ -215,16 +216,22 @@ def evaluate(opt):
         
     if opt.visualize_depth:
         vis_dir = os.path.join(opt.vis_folder,opt.model_type, "vis_depth")
+
         os.makedirs(vis_dir, exist_ok=True)
 
     inference_times = []
     sequences = []
     keyframes = []
     frame_ids = []
-    
+    ssim_loss = torchmetrics.image.StructuralSimilarityIndexMeasure(reduction=None,return_full_image = True)
     errors = []
     ratios = []
-
+    scales_gt = []
+    scales_pred = []
+    transs_gt = []
+    transs_pred = []
+    ssims = []
+    # ms_ssim_loss = ms_ssim
     print("-> Computing predictions with size {}x{}".format(
         opt.width, opt.height))
 
@@ -243,6 +250,7 @@ def evaluate(opt):
 
             elif opt.eval_split == 'endonerf' or opt.eval_split =='hamlyn':
                 input_color = data['rgb'].cuda()
+
             if opt.post_process:
                 # Post-processed results require each image to have two forward passes
                 input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
@@ -251,12 +259,21 @@ def evaluate(opt):
                 time_start = time.time()
                 if opt.model_type == 'dino_v2':
                     output = depther.whole_inference(input_color,img_meta = None,rescale = True)
+                    
                     output_disp = output
                 elif opt.model_type =='depthpro':
                     output = depther.infer(input_color)
                     output_disp = output['depth']
                 else:
                     output = depther(input_color)
+                    # feature = depther.pretrained.get_intermediate_layers(input_color,12)
+                    # features_np = feature[-1].detach().cpu().numpy()
+                    # # print('Total {} features'.format(len(feature)))
+                    # # print(feature[0].shape)
+                    # # print("~~~~~~feature 2 ~~~~~~~~")
+                    # # print(feature[1].shape)
+
+                    # np.save('features/Synth/{}'.format(i),features_np)
 
                 inference_time = time.time() - time_start
                 if opt.model_type == 'endodac':
@@ -316,47 +333,67 @@ def evaluate(opt):
             
             mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
-            if opt.visualize_depth:
-                if opt.eval_split =='endovis':
-                    rgb = data[("color", 0, 0)].squeeze().permute(1,2,0)
-                elif opt.eval_split =='endonerf' or opt.eval_split =='hamlyn':
-                    rgb = data['rgb'].squeeze().permute(1,2,0)
+            # if opt.visualize_depth:
+            #     if opt.eval_split =='endovis':
+            #         rgb = data[("color", 0, 0)].squeeze().permute(1,2,0)
+            #     elif opt.eval_split =='endonerf' or opt.eval_split =='hamlyn':
+            #         rgb = data['rgb'].squeeze().permute(1,2,0)
 
-                if opt.eval_split =='hamlyn':
-                    frame_id ,_= data['id'][0].split('.')
-                fig,ax = plt.subplots(1,3,figsize = (15,5))
-                ax[0].imshow((rgb-rgb.min())/(rgb.max()-rgb.min()))
-                im1 = ax[1].imshow(pred_depth)
-                plt.colorbar(im1,ax = ax[1])
+            #     if opt.eval_split =='hamlyn':
+            #         frame_id ,_= data['id'][0].split('.')
+            #     fig,ax = plt.subplots(1,3,figsize = (15,5))
+            #     ax[0].imshow((rgb-rgb.min())/(rgb.max()-rgb.min()))
+            #     im1 = ax[1].imshow(pred_depth)
+            #     plt.colorbar(im1,ax = ax[1])
 
-                im2 = ax[2].imshow((gt_depth-gt_depth.min())/(gt_depth.max()-gt_depth.min()))
-                plt.colorbar(im2,ax= ax[2])
+            #     im2 = ax[2].imshow((gt_depth-gt_depth.min())/(gt_depth.max()-gt_depth.min()))
+            #     plt.colorbar(im2,ax= ax[2])
 
-                if opt.eval_split =='endovis':
-                    vis_file_name = os.path.join(vis_dir, sequence + "_" +  keyframe + "_" + frame_id + ".png")
-                elif opt.eval_split =='endonerf' or opt.eval_split =='hamlyn':
-                    vis_file_name = os.path.join(vis_dir,frame_id + ".png")
-                fig.savefig(vis_file_name)
-                plt.close()
-    
+            #     if opt.eval_split =='endovis':
+            #         vis_file_name = os.path.join(vis_dir, sequence + "_" +  keyframe + "_" + frame_id + ".png")
+            #     elif opt.eval_split =='endonerf' or opt.eval_split =='hamlyn':
+            #         if opt.eval_split =='hamlyn':
+            #             frame_id = frame_id.split('/')[-1]
+            #         vis_file_name = os.path.join(vis_dir,frame_id + ".png")
 
+            #     fig.savefig(vis_file_name)
+            #     plt.close()
+
+            # ssim = ssim_loss(torch.tensor(gt_depth/255,dtype = torch.float32).unsqueeze(0).unsqueeze(0),torch.tensor(pred_disp).unsqueeze(0).unsqueeze(0))
+            # plt.imshow(ssim.squeeze().cpu().numpy())
+            # plt.colorbar()
+            # plt.show()
+            # ssims.append(ssim)
+            gt_depth_unmasked = gt_depth*mask
+            pred_disp_unmasked = pred_disp*mask
+            
             gt_depth = gt_depth[mask]
             pred_disp = pred_disp[mask]
 
 
-            if gt_depth.shape[0]<100: # If there are fewer than 1000 valid depth pixels, skip the current iteration
+            if gt_depth.shape[0]<100: # If there are fewer than 100 valid depth pixels, skip the current iteration
                 counter+=1
                 continue
 
-            if opt.model_type == 'depthanything_v1' or opt.model_type == 'depthanything_v2' or opt.model_type == 'surgedepth':
-                gt_disp = 1/gt_depth
+            if opt.model_type == 'depthanything_v1' or opt.model_type == 'depthanything_v2' or opt.model_type == 'surgedepth' or opt.model_type == 'dino_v2':
+                # if not opt.model_type == 'dino_v2':
+                gt_disp = 1/gt_depth    
+                if opt.model_type =='dino_v2':
+                    pred_disp = 1/pred_disp
+
     
                 pred_disp_aligned, t_gt, s_gt, t_pred, s_pred = align_shift_and_scale(gt_disp, pred_disp)
+                scales_gt.append(s_gt)
+                scales_pred.append(s_pred)
+                transs_pred.append(t_pred)
+                transs_gt.append(t_gt)
 
 
                 pred_depth = 1 / pred_disp_aligned
             else:
+                pred_depth_unmasked = pred_depth
                 pred_depth = pred_depth[mask]
+                
 
 
             pred_depth *= opt.pred_depth_scale_factor
@@ -368,10 +405,79 @@ def evaluate(opt):
                 pred_depth *= ratio
 
             
+            # gt_depth_unmasked_aligned =
+            # if opt.model_type == 'depthanything_v1' or opt.model_type == 'depthanything_v2' or opt.model_type == 'surgedepth' or opt.model_type == 'dino_v2':
+            #     if opt.model_type == 'dino_v2': # Dino already predicts depth directly, so converting to disp and back gets a bit messy
+            #         pred_disp_unmasked = 1/(pred_depth_unmasked+1e-4)
+            #     pred_disp_unmasked_aligned = (pred_disp_unmasked - t_pred) * (s_gt / s_pred) + t_gt
+            #     pred_depth_unmasked = 1 / pred_disp_unmasked_aligned
+            # else:
+
+            #     pred_depth_unmasked = 1/pred_disp_unmasked
+            #     pred_depth_unmasked *= ratio
+            # pred_disp_unmasked = (pred_disp_unmasked-pred_disp_unmasked.min())/(pred_disp_unmasked.max()-pred_disp_unmasked.min())*9+1
+            # gt_depth_unmasked = ((gt_depth_unmasked-gt_depth_unmasked.min())/(gt_depth_unmasked.max()-gt_depth_unmasked.min())*9+1)*mask
+
+            # pred_depth_unmasked = (1/pred_disp_unmasked)*mask
+            if opt.model_type == 'depthanything_v1' or opt.model_type == 'depthanything_v2' or opt.model_type == 'surgedepth':
+                # if opt.model_type == 'dino_v2':
+                    # pred_disp_unmasked = 1/pred_disp_unmasked
+                pred_disp_unmasked[pred_disp_unmasked< 0.0001] = 0.0001
+                pred_disp_unmasked[pred_disp_unmasked>150] = 150
+                pred_disp_aligned_unmasked =((pred_disp_unmasked - t_pred) * (s_gt / s_pred) + t_gt)
+                # if not opt.model_type =='dino_v2':
+                pred_depth_unmasked = (1/pred_disp_aligned_unmasked)*mask
+                # else:
+                    
+                pred_depth_unmasked[pred_depth_unmasked<0.001] = 0.001
+                pred_depth_unmasked[pred_depth_unmasked>150] = 150
+            else:
+                if opt.model_type =='dino_v2':
+                    pred_depth_unmasked = pred_disp_unmasked*mask*ratio
+                else:
+                    pred_depth_unmasked = pred_depth_unmasked*ratio*mask
+
+
+            ms_ssim,full_image = ssim_loss(torch.tensor(gt_depth_unmasked).unsqueeze(0).unsqueeze(0).to(torch.float32),torch.tensor(pred_depth_unmasked).unsqueeze(0).unsqueeze(0).to(torch.float32))
+            ms_ssim_loss_masked = torch.mean(full_image.squeeze()[mask])
             pred_depth[pred_depth < MIN_DEPTH] = MIN_DEPTH
             pred_depth[pred_depth > MAX_DEPTH] = MAX_DEPTH
+            # pred_depth_unmasked[pred_depth_unmasked < MIN_DEPTH] = MIN_DEPTH
+            # pred_depth_unmasked[pred_depth_unmasked > MAX_DEPTH] = MAX_DEPTH
             error = compute_errors(gt_depth, pred_depth)
 
+            if opt.visualize_depth:
+                    if opt.eval_split =='endovis':
+                        rgb = data[("color", 0, 0)].squeeze().permute(1,2,0)
+                    elif opt.eval_split =='endonerf' or opt.eval_split =='hamlyn':
+                        rgb = data['rgb'].squeeze().permute(1,2,0)
+
+                    if opt.eval_split =='hamlyn':
+                        frame_id ,_= data['id'][0].split('.')
+                    fig,ax = plt.subplots(1,4,figsize = (15,5))
+                    ax[0].imshow((rgb-rgb.min())/(rgb.max()-rgb.min()))
+                    im1 = ax[1].imshow(pred_depth_unmasked)
+                    # plt.colorbar(im1,ax = ax[1])
+
+                    im2 = ax[2].imshow(gt_depth_unmasked)
+                    # plt.colorbar(im2,ax= ax[2])
+                    ax[2].set_title(f'calculated ms-ssim: {ms_ssim.item()}, {ms_ssim_loss_masked.item()}')
+
+                    ax[3].imshow(full_image.squeeze().cpu().numpy()*mask)
+
+                    if opt.eval_split =='endovis':
+                        vis_file_name = os.path.join(vis_dir, sequence + "_" +  keyframe + "_" + frame_id + ".png")
+                    elif opt.eval_split =='endonerf' or opt.eval_split =='hamlyn':
+                        if opt.eval_split =='hamlyn':
+                            frame_id = frame_id.split('/')[-1]
+                        vis_file_name = os.path.join(vis_dir,frame_id + ".png")
+
+                    fig.savefig(vis_file_name)
+                    plt.close()
+
+
+            if not torch.isnan(ms_ssim):
+                ssims.append(ms_ssim.item())
                 
 
             if not np.isnan(error).all():
@@ -385,6 +491,10 @@ def evaluate(opt):
     errors = np.array(errors)
 
     mean_errors = np.mean(errors, axis=0)
+    # scale_gt = np.mean(np.array(scales_gt))
+    # scale_pred= np.mean(np.array(scales_pred))
+    # trans_gt = np.mean(np.array(transs_gt))
+    # trans_pred = np.mean(np.array(transs_pred))
 
     cls = []
     for i in range(len(mean_errors)):
@@ -392,10 +502,13 @@ def evaluate(opt):
         cls.append(cl[0])
         cls.append(cl[1])
     cls = np.array(cls)
-    print("\n       " + ("{:>11}      | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-    print("mean:" + ("&{: 12.3f}      " * 7).format(*mean_errors.tolist()) + "\\\\")
-    print("cls: " + ("& [{: 6.3f}, {: 6.3f}] " * 7).format(*cls.tolist()) + "\\\\")
+    print("\n       " + ("{:>11}      | " * 8).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3","psnr"))
+    print("mean:" + ("&{: 12.3f}      " * 8).format(*mean_errors.tolist()) + "\\\\")
+    print("cls: " + ("& [{: 6.3f}, {: 6.3f}] " * 8).format(*cls.tolist()) + "\\\\")
+    print("ssims: {: 6.3f}".format(np.mean(np.array(ssims))))
     print("average inference time: {:0.1f} ms".format(np.mean(np.array(inference_times))*1000))
+    # print("average ssim: {:0.3f}".format(np.mean(np.array(ssims))))
+    # print(f'Average scale gt:{scales_gt},average trans gt: {transs_gt},average scale pred: {scales_pred}, average trans pred: {transs_pred}')
 
     print("\n-> Done!")
 
